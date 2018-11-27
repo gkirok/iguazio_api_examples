@@ -2,14 +2,14 @@ def label = "${UUID.randomUUID().toString()}"
 def BUILD_FOLDER = '/go'
 def github_user = "gkirok"
 def docker_user = "gallziguazio"
-
+def git_project = 'iguazio_api_examples'
 
 properties([pipelineTriggers([[$class: 'PeriodicFolderTrigger', interval: '2m']])])
-podTemplate(label: "netops-demo-${label}", yaml: """
+podTemplate(label: "${git_project}-${label}", yaml: """
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "tsdb-nuclio-${label}"
+  name: "${git_project}-${label}"
   labels:
     jenkins/kube-default: "true"
     app: "jenkins"
@@ -47,7 +47,6 @@ spec:
       emptyDir: {}
 """
     ) {
-    def git_project = 'iguazio_api_examples'
     node("netops-demo-${label}") {
         withCredentials([
                 usernamePassword(credentialsId: '4318b7db-a1af-4775-b871-5a35d3e75c21', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')
@@ -82,7 +81,8 @@ spec:
 //                    ).trim()
 
                     stage('prepare sources') {
-                        sh """ 
+                        container('jnlp') {
+                            sh """
                                 cd ${BUILD_FOLDER}
                                 git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${github_user}/${git_project}.git src/github.com/v3io/${git_project}
                                 cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo/golang/src/github.com/v3io/demos
@@ -90,7 +90,8 @@ spec:
                                 git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${github_user}/v3io-tsdb.git vendor/github.com/v3io/v3io-tsdb
                                 cd vendor/github.com/v3io/v3io-tsdb
                                 rm -rf .git vendor/github.com/v3io vendor/github.com/nuclio
-                        """
+                            """
+                        }
                     }
 //                                git checkout ${V3IO_TSDB_VERSION}
 
@@ -111,17 +112,19 @@ spec:
                     }
 
                     stage('git push') {
-                        try {
-                            sh """
-                                git config --global user.email '${GIT_USERNAME}@iguazio.com'
-                                git config --global user.name '${GIT_USERNAME}'
-                                cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo
-                                git add *
-                                git commit -am 'Updated TSDB to latest';
-                                git push origin master
-                            """
-                        } catch (err) {
-                            echo "Can not push code to git"
+                        container('jnlp') {
+                            try {
+                                sh """
+                                    git config --global user.email '${GIT_USERNAME}@iguazio.com'
+                                    git config --global user.name '${GIT_USERNAME}'
+                                    cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo
+                                    git add *
+                                    git commit -am 'Updated TSDB to latest';
+                                    git push origin master
+                                """
+                            } catch (err) {
+                                echo "Can not push code to git"
+                            }
                         }
                     }
                 } else {
