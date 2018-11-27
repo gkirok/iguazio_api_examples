@@ -5,17 +5,77 @@ def docker_user = "gallziguazio"
 
 
 properties([pipelineTriggers([[$class: 'PeriodicFolderTrigger', interval: '2m']])])
-podTemplate(label: "netops-demo-${label}", inheritFrom: 'kube-slave-dood') {
+podTemplate(label: "netops-demo-${label}", yaml: """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "tsdb-nuclio-${label}"
+  labels:
+    jenkins/kube-default: "true"
+    app: "jenkins"
+    component: "agent"
+spec:
+  shareProcessNamespace: true
+  replicas: 3
+  containers:
+    - name: jnlp
+      image: jenkinsci/jnlp-slave
+      resources:
+        limits:
+          cpu: 1
+          memory: 2Gi
+        requests:
+          cpu: 1
+          memory: 2Gi
+      volumeMounts:
+        - name: go-shared
+          mountPath: /go
+    - name: docker-cmd
+      image: docker
+      command: [ "/bin/sh", "-c", "--" ]
+      args: [ "while true; do sleep 30; done;" ]
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+        - name: go-shared
+          mountPath: /go
+  volumes:
+    - name: docker-sock
+      hostPath:
+          path: /var/run
+    - name: go-shared
+      emptyDir: {}
+"""
+    ) {
+    def git_project = 'iguazio_api_examples'
     node("netops-demo-${label}") {
         withCredentials([
                 usernamePassword(credentialsId: '4318b7db-a1af-4775-b871-5a35d3e75c21', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')
+                string(credentialsId: 'dd7f75c5-f055-4eb3-9365-e7d04e644211', variable: 'GIT_TOKEN')
         ]) {
             stage('release') {
-                def TAG_VERSION = sh(
-                        script: "echo ${TAG_NAME} | tr -d '\\n' | egrep '^v[\\.0-9]*.*\$' | sed 's/v//'",
-                        returnStdout: true
-                ).trim()
-                if ( TAG_VERSION ) {
+                def AUTO_TAG
+                def TAG_VERSION
+
+                stage('get tag data') {
+                    container('jnlp') {
+                        TAG_VERSION = sh(
+                                script: "echo ${TAG_NAME} | tr -d '\\n' | egrep '^v[\\.0-9]*.*\$' | sed 's/v//'",
+                                returnStdout: true
+                        ).trim()
+
+                        sh "curl -v -H \"Authorization: token ${GIT_TOKEN}\" https://api.github.com/repos/gkirok/${git_project}/releases/tags/v${TAG_VERSION} > ~/tag_version"
+                        AUTO_TAG = sh(
+                                script: "cat ~/tag_version | python -c 'import json,sys;obj=json.load(sys.stdin);print obj[\"body\"]'",
+                                returnStdout: true
+                        ).trim()
+                    }
+                }
+
+                echo "$TAG_VERSION"
+                echo "$AUTO_TAG"
+
+                if ( TAG_VERSION && !AUTO_TAG.startsWith("Autorelease") ) {
 //                    def V3IO_TSDB_VERSION = sh(
 //                            script: "echo ${TAG_VERSION} | awk -F '-v' '{print \"v\"\$2}'",
 //                            returnStdout: true
@@ -24,8 +84,8 @@ podTemplate(label: "netops-demo-${label}", inheritFrom: 'kube-slave-dood') {
                     stage('prepare sources') {
                         sh """ 
                                 cd ${BUILD_FOLDER}
-                                git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${github_user}/iguazio_api_examples.git src/github.com/v3io/iguazio_api_examples
-                                cd ${BUILD_FOLDER}/src/github.com/v3io/iguazio_api_examples/netops_demo/golang/src/github.com/v3io/demos
+                                git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${github_user}/${git_project}.git src/github.com/v3io/${git_project}
+                                cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo/golang/src/github.com/v3io/demos
                                 rm -rf vendor/github.com/v3io/v3io-tsdb/
                                 git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${github_user}/v3io-tsdb.git vendor/github.com/v3io/v3io-tsdb
                                 cd vendor/github.com/v3io/v3io-tsdb
@@ -37,15 +97,15 @@ podTemplate(label: "netops-demo-${label}", inheritFrom: 'kube-slave-dood') {
                     stage('build in dood') {
                         container('docker-cmd') {
                             sh """
-                                cd ${BUILD_FOLDER}/src/github.com/v3io/iguazio_api_examples/netops_demo/golang/src/github.com/v3io/demos
-                                docker build . --tag netops-demo-golang:latest --tag ${docker_user}/netops-demo-golang:$NETOPS_DEMO_VERSION --build-arg NUCLIO_BUILD_OFFLINE=true --build-arg NUCLIO_BUILD_IMAGE_HANDLER_DIR=github.com/v3io/demos
+                                cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo/golang/src/github.com/v3io/demos
+                                docker build . --tag netops-demo-golang:latest --tag ${docker_user}/netops-demo-golang:${TAG_VERSION} --build-arg NUCLIO_BUILD_OFFLINE=true --build-arg NUCLIO_BUILD_IMAGE_HANDLER_DIR=github.com/v3io/demos
 
-                                cd ${BUILD_FOLDER}/src/github.com/v3io/iguazio_api_examples/netops_demo/py
-                                docker build . --tag netops-demo-py:latest --tag ${docker_user}/netops-demo-py:$NETOPS_DEMO_VERSION
+                                cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo/py
+                                docker build . --tag netops-demo-py:latest --tag ${docker_user}/netops-demo-py:${TAG_VERSION}
                             """
                             withDockerRegistry([credentialsId: "472293cc-61bc-4e9f-aecb-1d8a73827fae", url: ""]) {
-                                sh "docker push ${docker_user}/netops-demo-golang:${NETOPS_DEMO_VERSION}"
-                                sh "docker push ${docker_user}/netops-demo-py:${NETOPS_DEMO_VERSION}"
+                                sh "docker push ${docker_user}/netops-demo-golang:${TAG_VERSION}"
+                                sh "docker push ${docker_user}/netops-demo-py:${TAG_VERSION}"
                             }
                         }
                     }
@@ -55,7 +115,7 @@ podTemplate(label: "netops-demo-${label}", inheritFrom: 'kube-slave-dood') {
                             sh """
                                 git config --global user.email '${GIT_USERNAME}@iguazio.com'
                                 git config --global user.name '${GIT_USERNAME}'
-                                cd ${BUILD_FOLDER}/src/github.com/v3io/iguazio_api_examples/netops_demo
+                                cd ${BUILD_FOLDER}/src/github.com/v3io/${git_project}/netops_demo
                                 git add *
                                 git commit -am 'Updated TSDB to latest';
                                 git push origin master
@@ -65,7 +125,11 @@ podTemplate(label: "netops-demo-${label}", inheritFrom: 'kube-slave-dood') {
                         }
                     }
                 } else {
-                    echo "${TAG_VERSION} is not release tag."
+                    if (AUTO_TAG.startsWith("Autorelease")) {
+                        echo "Autorelease does not trigger this job."
+                    } else {
+                        echo "${TAG_VERSION} is not release tag."
+                    }
                 }
             }
         }
