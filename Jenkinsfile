@@ -72,7 +72,7 @@ spec:
                 }
             }
 
-            if ( TAG_VERSION && !AUTO_TAG.startsWith("Autorelease") ) {
+            if ( TAG_VERSION ) {
 //                    def V3IO_TSDB_VERSION = sh(
 //                            script: "echo ${TAG_VERSION} | awk -F '-v' '{print \"v\"\$2}'",
 //                            returnStdout: true
