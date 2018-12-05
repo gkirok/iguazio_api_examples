@@ -47,8 +47,11 @@ spec:
 """
     ) {
     node("netops-demo-${label}") {
+        currentBuild.displayName = "${git_project}"
+        currentBuild.description = "Will not run with tags created before 4 hours and more."
+
         withCredentials([
-                usernamePassword(credentialsId: '4318b7db-a1af-4775-b871-5a35d3e75c21', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')
+                usernamePassword(credentialsId: '4318b7db-a1af-4775-b871-5a35d3e75c21', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME'),
                 string(credentialsId: 'dd7f75c5-f055-4eb3-9365-e7d04e644211', variable: 'GIT_TOKEN')
         ]) {
             def AUTO_TAG
@@ -68,7 +71,7 @@ spec:
                     ).trim()
 
                     PUBLISHED_BEFORE = sh(
-                            script: "tag_published_at=\$(cat ~/tag_version | python -c 'import json,sys;obj=json.load(sys.stdin);print obj[\"published_at\"]'); SECONDS=\$(expr \$(date +%s) - \$(date -d \"\$tag_published_at\" +%s)); expr \$SECONDS / 3600",
+                            script: "tag_published_at=\$(cat ~/tag_version | python -c 'import json,sys;obj=json.load(sys.stdin);print obj[\"published_at\"]'); SECONDS=\$(expr \$(date +%s) - \$(date -d \"\$tag_published_at\" +%s)); expr \$SECONDS / 60 + 1",
                             returnStdout: true
                     ).trim()
 
@@ -78,7 +81,7 @@ spec:
                 }
             }
 
-            if ( TAG_VERSION && PUBLISHED_BEFORE < 3 ) {
+            if ( TAG_VERSION && PUBLISHED_BEFORE < 240 ) {
 //                    def V3IO_TSDB_VERSION = sh(
 //                            script: "echo ${TAG_VERSION} | awk -F '-v' '{print \"v\"\$2}'",
 //                            returnStdout: true
@@ -134,8 +137,8 @@ spec:
                 }
             } else {
                 stage('warning') {
-                    if (PUBLISHED_BEFORE >= 3) {
-                        echo "Tag published date too old. Before $PUBLISHED_BEFORE hours."
+                    if (PUBLISHED_BEFORE >= 240) {
+                        echo "Tag too old, published before $PUBLISHED_BEFORE minutes."
                     } else if (AUTO_TAG.startsWith("Autorelease")) {
                         echo "Autorelease does not trigger this job."
                     } else {
