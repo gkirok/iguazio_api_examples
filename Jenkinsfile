@@ -1,8 +1,8 @@
 def label = "${UUID.randomUUID().toString()}"
-def BUILD_FOLDER = '/go'
+def BUILD_FOLDER = "/go"
 def github_user = "gkirok"
 def docker_user = "gallziguazio"
-def git_project = 'iguazio_api_examples'
+def git_project = "iguazio_api_examples"
 
 properties([pipelineTriggers([[$class: 'PeriodicFolderTrigger', interval: '2m']])])
 podTemplate(label: "${git_project}-${label}", yaml: """
@@ -65,6 +65,7 @@ spec:
                     ).trim()
 
                     sh "curl -v -H \"Authorization: token ${GIT_TOKEN}\" https://api.github.com/repos/gkirok/${git_project}/releases/tags/v${TAG_VERSION} > ~/tag_version"
+
                     AUTO_TAG = sh(
                             script: "cat ~/tag_version | python -c 'import json,sys;obj=json.load(sys.stdin);print obj[\"body\"]'",
                             returnStdout: true
